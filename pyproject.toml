@@ -48,13 +48,13 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "mypy>=1.15.0",
-    "pre-commit>=4.1.0",
-    "ruff>=0.9.6",
+    "pre-commit>=4.2.0",
+    "ruff>=0.11.2",
     "vdf>=3.4",
 ]
 test = [
-    "coverage>=7.6.12",
-    "pytest>=8.3.4",
+    "coverage>=7.7.1",
+    "pytest>=8.3.5",
 ]
 docs = [
     "ipykernel>=6.29.5",
