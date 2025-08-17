@@ -144,7 +144,12 @@ def kast(demo: awpy.demo.Demo, trade_length_in_seconds: float = 3.0) -> pl.DataF
 
     # --- Survivals ---
     # Get the last tick of each round per player, then only keep those with health > 0.
-    survivals = demo.ticks.sort("tick").group_by(["name", "steamid", "round_num"]).tail(1).filter(pl.col("health") > 0)
+    survivals = (
+        demo.ticks.sort("tick")
+        .group_by(["name", "steamid", "round_num"])
+        .agg(pl.all().last())
+        .filter(pl.col("health") > 0)
+    )
     survivals_total = survivals.select(["name", "steamid", "round_num"]).unique()
     # Depending on your data, team names might be lowercase; adjust as needed.
     survivals_ct = (
