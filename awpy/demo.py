@@ -11,7 +11,7 @@ from pathlib import Path
 import polars as pl
 from demoparser2 import DemoParser
 from loguru import logger
-
+import polars.selectors as cs
 import awpy.constants
 import awpy.parsers.bomb
 import awpy.parsers.events
@@ -676,7 +676,7 @@ class Demo:
                 ("ticks", self.ticks),
                 ("rounds", self.rounds),
                 ("events", pl.concat(
-                    [df.with_columns(pl.col(pl.Numeric).cast(pl.Float64)) for df in self.events.values()], 
+                    [df.with_columns(cs.numeric().cast(pl.Float64)) for df in self.events.values()],
                     how="diagonal"
                 )),
             ]:
