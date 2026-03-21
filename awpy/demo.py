@@ -675,7 +675,7 @@ class Demo:
                 ("bomb", self.bomb),
                 ("ticks", self.ticks),
                 ("rounds", self.rounds),
-                ("events", pl.concat(list(self.events.values()))),
+                ("events", pl.concat(list(self.events.values()), how="diagonal")),
             ]:
                 parsed_df_filename = Path(tmpdirname) / f"{df_name}.parquet"
                 parsed_df.write_parquet(parsed_df_filename)
