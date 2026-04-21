@@ -70,7 +70,8 @@ source = ["awpy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-
+[tool.hatch.metadata]
+allow-direct-references = true
 # Setuptools
 [tool.setuptools]
 include-package-data = true
