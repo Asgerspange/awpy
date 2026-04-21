@@ -570,7 +570,10 @@ class Demo:
         # Loop through and process each event
         for event_name, event in events.items():
             # Convert the event from a pandas DataFrame to a Polars DataFrame.
-            events[event_name] = awpy.parsers.utils.fix_common_names(pl.from_pandas(event))
+            if isinstance(event, list):
+                events[event_name] = pl.DataFrame()
+            else:
+                events[event_name] = awpy.parsers.utils.fix_common_names(pl.from_pandas(event))
             if event_name == "round_start":
                 # Label the event as 'start'
                 events[event_name] = events[event_name].with_columns(pl.lit("start").alias("event"))
