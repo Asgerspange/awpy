@@ -144,8 +144,14 @@ def kast(demo: awpy.demo.Demo, trade_length_in_seconds: float = 3.0) -> pl.DataF
 
     # --- Survivals ---
     # Get the last tick of each round per player, then only keep those with health > 0.
+    # Select only the columns this step needs BEFORE the sort/group_by. The
+    # previous ``pl.all().last()`` sorted and aggregated every tick column
+    # (including the heavy ``inventory`` list and ``crosshair_code`` string
+    # columns) across the full multi-million-row frame, which was the single
+    # largest transient in stats computation.
     survivals = (
-        demo.ticks.sort("tick")
+        demo.ticks.select(["name", "steamid", "round_num", "tick", "health", "side"])
+        .sort("tick")
         .group_by(["name", "steamid", "round_num"])
         .agg(pl.all().last())
         .filter(pl.col("health") > 0)

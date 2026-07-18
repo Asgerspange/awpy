@@ -1,5 +1,8 @@
 """Defines the Demo class."""
 
+import ctypes
+import ctypes.util
+import gc
 import json
 import sys
 import tempfile
@@ -21,6 +24,29 @@ import awpy.parsers.ticks
 import awpy.parsers.utils
 
 PROP_WARNING_LIMIT = 40
+
+# Parse tick data in windows of this many ticks at a time. The Rust parser
+# hands tick data back as a *pandas* frame (millions of Python str/list objects
+# for props like ``inventory`` / ``crosshair_code``), which ``pl.from_pandas``
+# then duplicates into Polars. Materialising the whole demo at once spikes RSS
+# to ~11x the size of the final Polars frame. Parsing in tick windows and
+# releasing each pandas intermediate before the next bounds that spike, at the
+# cost of re-reading the demo once per window. Set ``Demo.tick_chunk_size = 0``
+# to restore the old single-shot behaviour.
+DEFAULT_TICK_CHUNK_SIZE = 20000
+
+
+def _malloc_trim() -> None:
+    """Return freed heap back to the OS (glibc only; best effort, no-op elsewhere).
+
+    Without this the fat pandas intermediates freed between tick windows stay in
+    glibc's arena and RSS never drops, defeating the point of windowing.
+    """
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        libc.malloc_trim(0)
+    except Exception:  # noqa: BLE001 - platform without glibc malloc_trim
+        pass
 DEFAULT_PLAYER_PROPS = [
     "team_name",
     "team_clan_name",
@@ -138,6 +164,9 @@ class Demo:
         self.inferno_duration = inferno_duration
         self.smoke_duration = smoke_duration
         self.in_play_ticks = None
+        # Windowed tick parsing to bound peak memory (see DEFAULT_TICK_CHUNK_SIZE).
+        self.tick_chunk_size = DEFAULT_TICK_CHUNK_SIZE
+        self._max_tick: int | None = None
 
         if verbose:
             logger.remove()
@@ -253,20 +282,28 @@ class Demo:
             )
         )
 
-        # Parse, filter, and apply round number to ticks
-        self.ticks = self.parse_ticks(player_props=player_props)
-        self.ticks = self.ticks.filter(pl.col("tick").is_in(self.in_play_ticks))
-        self.ticks = awpy.parsers.rounds.apply_round_num(df=self.ticks, rounds_df=self.rounds, tick_col="tick").filter(
-            pl.col("round_num").is_not_null()
-        )
-        self.ticks = awpy.parsers.utils.fix_common_names(self.ticks)
-
-        # Parse, filter, and apply round number to grenades
+        # Parse grenades BEFORE the big player-props tick frame. The Rust
+        # grenade parse holds a ~1.3M-row trajectory intermediate transiently
+        # (~900 MB to produce an ~90 MB frame); doing it now, while resident
+        # memory is still low, keeps that spike from stacking on top of the
+        # fully-built tick frame.
         self.grenades = self.parse_grenades()
         self.grenades = self.grenades.filter(pl.col("tick").is_in(self.in_play_ticks))
         self.grenades = awpy.parsers.rounds.apply_round_num(
             df=self.grenades, rounds_df=self.rounds, tick_col="tick"
         ).filter(pl.col("round_num").is_not_null())
+        gc.collect()
+        _malloc_trim()
+
+        # Parse, filter, and apply round number to ticks. Restricting the parse
+        # to the in-play ticks at the Rust layer (only_ticks) avoids a
+        # full-frame ``is_in`` copy of the multi-million-row tick DataFrame.
+        # ``player_props`` already includes the base props prepended above.
+        self.ticks = self._parse_ticks_windowed(player_props, only_ticks=self.in_play_ticks)
+        self.ticks = awpy.parsers.rounds.apply_round_num(df=self.ticks, rounds_df=self.rounds, tick_col="tick").filter(
+            pl.col("round_num").is_not_null()
+        )
+        self.ticks = awpy.parsers.utils.fix_common_names(self.ticks)
 
         logger.success(f"Finished parsing {self.path}, took {time.perf_counter() - start:.2f} seconds")
 
@@ -611,7 +648,78 @@ class Demo:
         self._raise_if_no_parser()
         player_props = player_props if player_props is not None else []
         other_props = other_props if other_props is not None else []
-        return pl.from_pandas(self.parser.parse_ticks(wanted_props=player_props + other_props))
+        return self._parse_ticks_windowed(player_props + other_props)
+
+    def _get_max_tick(self) -> int:
+        """Return (and cache) the highest tick number in the demo.
+
+        Uses a minimal single-property parse (~one int column) so windowing can
+        size its ranges without materialising the full tick frame.
+        """
+        if self._max_tick is None:
+            tick_df = self.parser.parse_ticks(wanted_props=["tick"])
+            self._max_tick = int(tick_df["tick"].max()) if len(tick_df) else 0
+        return self._max_tick
+
+    def _parse_ticks_windowed(
+        self, wanted_props: list[str], only_ticks: list[int] | None = None
+    ) -> pl.DataFrame:
+        """Parse ``wanted_props`` in tick windows and concatenate the results.
+
+        Bounds peak memory by materialising only ``tick_chunk_size`` ticks of the
+        fat pandas intermediate at a time (see ``DEFAULT_TICK_CHUNK_SIZE``). The
+        returned frame is identical to a single-shot ``parse_ticks`` call — the
+        Rust ``ticks=`` filter selects only ticks that actually exist, so a
+        contiguous range that overshoots the demo is harmless.
+
+        Args:
+            wanted_props: Properties to extract per tick.
+            only_ticks: If given, restrict parsing to exactly these ticks (the
+                windows iterate over this sorted set instead of the full tick
+                range). Passing the in-play ticks here filters at the Rust layer,
+                avoiding a full-frame ``is_in`` copy downstream.
+        """
+        chunk = self.tick_chunk_size
+
+        if only_ticks is not None:
+            wanted_ticks = sorted({int(t) for t in only_ticks})
+            if not chunk or chunk <= 0 or len(wanted_ticks) <= chunk:
+                return pl.from_pandas(
+                    self.parser.parse_ticks(wanted_props=wanted_props, ticks=wanted_ticks)
+                )
+            windows = (
+                wanted_ticks[i : i + chunk] for i in range(0, len(wanted_ticks), chunk)
+            )
+        else:
+            if not chunk or chunk <= 0:
+                return pl.from_pandas(self.parser.parse_ticks(wanted_props=wanted_props))
+            max_tick = self._get_max_tick()
+            if max_tick <= chunk:
+                return pl.from_pandas(self.parser.parse_ticks(wanted_props=wanted_props))
+            windows = (
+                list(range(lo, min(lo + chunk, max_tick + 1)))
+                for lo in range(0, max_tick + 1, chunk)
+            )
+
+        frames: list[pl.DataFrame] = []
+        for tick_window in windows:
+            window = self.parser.parse_ticks(
+                wanted_props=wanted_props, ticks=list(tick_window)
+            )
+            part = pl.from_pandas(window)
+            del window
+            if part.height:
+                frames.append(part)
+            gc.collect()
+            _malloc_trim()
+
+        if not frames:
+            return pl.from_pandas(self.parser.parse_ticks(wanted_props=wanted_props))
+        result = pl.concat(frames)
+        del frames
+        gc.collect()
+        _malloc_trim()
+        return result
 
     def parse_grenades(self) -> pl.DataFrame:
         """Parse grenade event data from the demo file.

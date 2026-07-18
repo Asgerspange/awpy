@@ -126,6 +126,8 @@ def rating(
     impact_coef: float = 0.2372,
     adr_coef: float = 0.0032,
     intercept: float = 0.1587,
+    kast_df: pl.DataFrame | None = None,
+    adr_df: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
     """Calculates player rating (similar to HLTV) using Polars.
 
@@ -197,8 +199,13 @@ def rating(
 
     # Get additional stats from other helper functions.
     # (Assuming these functions have been refactored to return Polars DataFrames.)
-    kast_df = kast(demo)
-    adr_df = adr(demo)
+    # Callers that already computed KAST/ADR can pass them in to avoid the
+    # (expensive) recomputation — kast/adr each build large per-round
+    # intermediates off the tick data.
+    if kast_df is None:
+        kast_df = kast(demo)
+    if adr_df is None:
+        adr_df = adr(demo)
     impact_df = impact(demo)
 
     # --- Merge all stats ---
