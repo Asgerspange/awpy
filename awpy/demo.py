@@ -715,7 +715,13 @@ class Demo:
 
         if not frames:
             return pl.from_pandas(self.parser.parse_ticks(wanted_props=wanted_props))
-        result = pl.concat(frames)
+        # ``vertical_relaxed`` coerces per-window schema mismatches to a common
+        # supertype. Windows are inferred independently, so a numeric column that
+        # is entirely null in one window (e.g. ``which_bomb_zone`` when no bomb
+        # is in a zone) comes back as Float64 there but Int32 where it has
+        # values; a strict vstack would raise SchemaError. The single-shot parse
+        # never hit this because it infers each column's dtype once over all rows.
+        result = pl.concat(frames, how="vertical_relaxed")
         del frames
         gc.collect()
         _malloc_trim()
