@@ -3342,10 +3342,9 @@ impl Parser {
                 continue;
             }
             state.side = Some(team_name(team));
-            if let Some(ctrl) = pawn
-                .get_handle(pk.controller)
-                .and_then(|h| ctx.entities().get_by_handle(h))
-            {
+            // Dead pawns can drop `m_hController`; fall back to the original
+            // controller so dead players keep their Steam id and name.
+            if let Some(ctrl) = pk.controller(pawn, ctx.entities()) {
                 state.steamid = ctrl.get_u64(ck.steamid);
                 state.name = ctrl.get_string(ck.name);
                 state.money = i32::try_from(ctrl.get_i64(ck.money)).unwrap_or_default();
@@ -3705,6 +3704,27 @@ mod tests {
             events.iter().filter(|e| e.name == "player_blind").collect();
         assert!(!blinds.is_empty());
         assert!(blinds.iter().all(|e| steamid(e, "userid").is_some()));
+    }
+
+    /// Dead players keep their Steam id in snapshots (set `AWPY_TEST_DEMO`).
+    /// Ignored by default; run with `--ignored`.
+    #[test]
+    #[ignore = "requires AWPY_TEST_DEMO to point at a real .dem file"]
+    fn snapshots_keep_dead_player_identity() {
+        let path = std::env::var("AWPY_TEST_DEMO").unwrap();
+        let parser = Parser::from_file(std::path::Path::new(&path)).unwrap();
+        let states = parser
+            .snapshots_query(Some(64), &HashSet::new(), 0, i32::MAX)
+            .unwrap();
+        let dead: Vec<&PlayerState> = states.iter().filter(|s| s.health == 0).collect();
+        assert!(!dead.is_empty());
+        let missing = dead.iter().filter(|s| s.steamid.is_none()).count();
+        assert_eq!(
+            missing,
+            0,
+            "{missing} of {} dead rows lack a steamid",
+            dead.len()
+        );
     }
 
     #[test]
