@@ -71,6 +71,7 @@ pub mod position;
 pub mod round_end_reasons;
 pub mod stats;
 pub mod teams;
+pub mod territory;
 pub mod weapons;
 
 // Re-export commonly used types at the crate root for convenience
@@ -101,4 +102,5 @@ pub use position::{CELL_BITS, CELL_SIZE, WORLD_HALF, cell_to_world};
 pub use round_end_reasons::{all_round_end_reasons, round_end_reason_name};
 pub use stats::PlayerStats;
 pub use teams::{all_teams, team_name};
+pub use territory::{Burn, Runner, Territory, TerritoryControl, TerritoryParams};
 pub use weapons::{WeaponInfo, WeaponSlot, weapon_info};
