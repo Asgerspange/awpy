@@ -184,6 +184,130 @@ const STARTING_PISTOLS: &[WeaponVariant] = &[
         name: "usp_silencer",
     },
 ];
+/// Knives share one network class; the item definition names the model.
+/// Names follow the CS2 item names without the `weapon_` prefix.
+const KNIVES: &[WeaponVariant] = &[
+    WeaponVariant {
+        definition: 41,
+        subclass: 338_620_472,
+        name: "knifegg",
+    },
+    WeaponVariant {
+        definition: 42,
+        subclass: 294_910_436,
+        name: "knife",
+    },
+    WeaponVariant {
+        definition: 59,
+        subclass: 1_058_568_214,
+        name: "knife_t",
+    },
+    WeaponVariant {
+        definition: 80,
+        subclass: 839_540_137,
+        name: "knife_ghost",
+    },
+    WeaponVariant {
+        definition: 500,
+        subclass: 3_933_374_535,
+        name: "bayonet",
+    },
+    WeaponVariant {
+        definition: 503,
+        subclass: 3_787_235_507,
+        name: "knife_css",
+    },
+    WeaponVariant {
+        definition: 505,
+        subclass: 4_046_390_180,
+        name: "knife_flip",
+    },
+    WeaponVariant {
+        definition: 506,
+        subclass: 2_047_704_618,
+        name: "knife_gut",
+    },
+    WeaponVariant {
+        definition: 507,
+        subclass: 1_731_408_398,
+        name: "knife_karambit",
+    },
+    WeaponVariant {
+        definition: 508,
+        subclass: 1_638_561_588,
+        name: "knife_m9_bayonet",
+    },
+    WeaponVariant {
+        definition: 509,
+        subclass: 2_282_479_884,
+        name: "knife_tactical",
+    },
+    WeaponVariant {
+        definition: 512,
+        subclass: 3_412_259_219,
+        name: "knife_falchion",
+    },
+    WeaponVariant {
+        definition: 514,
+        subclass: 2_511_498_851,
+        name: "knife_survival_bowie",
+    },
+    WeaponVariant {
+        definition: 515,
+        subclass: 1_353_709_123,
+        name: "knife_butterfly",
+    },
+    WeaponVariant {
+        definition: 516,
+        subclass: 4_269_888_884,
+        name: "knife_push",
+    },
+    WeaponVariant {
+        definition: 517,
+        subclass: 1_105_782_941,
+        name: "knife_cord",
+    },
+    WeaponVariant {
+        definition: 518,
+        subclass: 275_962_944,
+        name: "knife_canis",
+    },
+    WeaponVariant {
+        definition: 519,
+        subclass: 1_338_637_359,
+        name: "knife_ursus",
+    },
+    WeaponVariant {
+        definition: 520,
+        subclass: 3_230_445_913,
+        name: "knife_gypsy_jackknife",
+    },
+    WeaponVariant {
+        definition: 521,
+        subclass: 3_206_681_373,
+        name: "knife_outdoor",
+    },
+    WeaponVariant {
+        definition: 522,
+        subclass: 2_595_277_776,
+        name: "knife_stiletto",
+    },
+    WeaponVariant {
+        definition: 523,
+        subclass: 4_029_975_521,
+        name: "knife_widowmaker",
+    },
+    WeaponVariant {
+        definition: 525,
+        subclass: 365_028_728,
+        name: "knife_skeleton",
+    },
+    WeaponVariant {
+        definition: 526,
+        subclass: 3_845_286_452,
+        name: "knife_kukri",
+    },
+];
 
 /// Field keys and the class fallback for one weapon class.
 struct WeaponIdentity {
@@ -199,6 +323,7 @@ impl WeaponIdentity {
             "CDEagle" | "CWeaponRevolver" => PISTOLS,
             "CWeaponM4A1" | "CWeaponM4A1Silencer" => RIFLES,
             "CWeaponHKP2000" | "CWeaponUSPSilencer" => STARTING_PISTOLS,
+            knife if knife.starts_with("CKnife") => KNIVES,
             _ => &[],
         }
     }
@@ -297,6 +422,7 @@ mod tests {
             ("CDEagle", PISTOLS, Secondary),
             ("CWeaponM4A1", RIFLES, Primary),
             ("CWeaponHKP2000", STARTING_PISTOLS, Secondary),
+            ("CKnife", KNIVES, Melee),
         ] {
             for variant in variants {
                 let info = entity_info(class, Some(variant.definition), None);
@@ -312,6 +438,7 @@ mod tests {
             ("CDEagle", PISTOLS),
             ("CWeaponM4A1", RIFLES),
             ("CWeaponHKP2000", STARTING_PISTOLS),
+            ("CKnife", KNIVES),
         ] {
             for variant in variants {
                 for definition in [None, Some(0), Some(u32::MAX)] {
