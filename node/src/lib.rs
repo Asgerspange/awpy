@@ -147,6 +147,22 @@ pub struct GrenadeColumns {
     pub thrower_steamid: StringColumn,
 }
 
+/// One round, reconstructed from game-rules state.
+#[napi(object)]
+pub struct Round {
+    pub round_num: i32,
+    pub start_tick: Option<i32>,
+    pub freeze_end_tick: Option<i32>,
+    pub end_tick: i32,
+    pub official_end_tick: Option<i32>,
+    /// `2` for T, `3` for CT.
+    pub winner: i32,
+    /// Raw `RoundEndReason_t` value.
+    pub reason: i32,
+    pub reason_name: String,
+    pub is_knife_round: bool,
+}
+
 /// A weapon purchase, pickup or drop.
 #[napi(object)]
 pub struct ItemEvent {
@@ -446,6 +462,26 @@ impl Demo {
             z: Float32Array::new(z),
             thrower_steamid: thrower.finish(),
         })
+    }
+
+    /// Rounds reconstructed from game-rules state, including overtime.
+    #[napi]
+    pub fn rounds(&self) -> napi::Result<Vec<Round>> {
+        let rows = self.parser.rounds().map_err(js_error)?;
+        Ok(rows
+            .into_iter()
+            .map(|row| Round {
+                round_num: row.round_num,
+                start_tick: row.start_tick,
+                freeze_end_tick: row.freeze_end_tick,
+                end_tick: row.end_tick,
+                official_end_tick: row.official_end_tick,
+                winner: row.winner,
+                reason: row.reason,
+                reason_name: row.reason_name,
+                is_knife_round: row.is_knife_round,
+            })
+            .collect())
     }
 
     /// Weapon purchases, pickups and drops.
