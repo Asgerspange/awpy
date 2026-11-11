@@ -1110,6 +1110,7 @@ impl EventPlayerKeys {
 /// Follows the `<role>_pawn` handle when the event carries one. Otherwise, or
 /// when that pawn is gone, uses the controller in the player slot named by the
 /// user id (controller entity index = slot + 1) and that controller's pawn.
+/// Some events (e.g. `bomb_pickup`) carry only the pawn key.
 fn event_player(
     ctx: &Context,
     keys: &Keys,
@@ -1117,14 +1118,13 @@ fn event_player(
     pawn_key: &str,
     k: &EventPlayerKeys,
 ) -> Option<EventPlayer> {
-    let user_id: i32 = keys.get(role)?.parse().ok()?;
-    if user_id == NO_USER_ID {
+    let user_id = keys.get(role).and_then(|value| value.parse::<i32>().ok());
+    if user_id == Some(NO_USER_ID) || (user_id.is_none() && keys.get(pawn_key).is_none()) {
         return None;
     }
     let is_pawn = |entity: &&Entity| entity.class_name.contains("PlayerPawn");
-    let controller = ctx
-        .entities()
-        .get((user_id & 0xff) + 1)
+    let controller = user_id
+        .and_then(|id| ctx.entities().get((id & 0xff) + 1))
         .filter(|entity| entity.class_name.as_ref() == PLAYER_CONTROLLER_CLASS);
     let pawn = keys
         .get(pawn_key)
@@ -3680,7 +3680,9 @@ mod tests {
     fn events_with_players_resolves_participants() {
         let path = std::env::var("AWPY_TEST_DEMO").unwrap();
         let parser = Parser::from_file(std::path::Path::new(&path)).unwrap();
-        let names: HashSet<&str> = ["player_death", "player_blind"].into_iter().collect();
+        let names: HashSet<&str> = ["player_death", "player_blind", "bomb_pickup"]
+            .into_iter()
+            .collect();
         let events = parser.events_with_players(&names).unwrap();
         let steamid = |event: &PlayerEvent, role: &str| {
             event
@@ -3704,6 +3706,12 @@ mod tests {
             events.iter().filter(|e| e.name == "player_blind").collect();
         assert!(!blinds.is_empty());
         assert!(blinds.iter().all(|e| steamid(e, "userid").is_some()));
+
+        // bomb_pickup carries only `userid_pawn`, no `userid`.
+        let pickups: Vec<&PlayerEvent> =
+            events.iter().filter(|e| e.name == "bomb_pickup").collect();
+        assert!(!pickups.is_empty());
+        assert!(pickups.iter().all(|e| steamid(e, "userid").is_some()));
     }
 
     /// Dead players keep their Steam id in snapshots (set `AWPY_TEST_DEMO`).
