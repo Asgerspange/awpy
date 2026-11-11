@@ -94,6 +94,10 @@ pub struct TerritoryInput {
     /// contested. `2`: also, space no one reaches in time goes to the side that
     /// sees it.
     pub sight: Option<u32>,
+    /// Look every this many samples and reuse the last look in between
+    /// (default `1`). Sight costs several times territory, and sightlines
+    /// change more slowly than the space each side can reach.
+    pub sight_step: Option<u32>,
     /// Crouched (`1`) per player, for eye height. Read with `sight`.
     pub crouched: Option<Uint8Array>,
     /// Blinded (`1`) per player; a blind player sees nothing. Read with `sight`.
@@ -145,6 +149,8 @@ pub struct NavMesh {
 /// One sample's inputs, copied out of the JavaScript arrays.
 #[derive(Default)]
 struct Sample {
+    /// Cast sight rays for this sample rather than reuse the last ones.
+    look: bool,
     observers: Vec<Observer>,
     runners: Vec<Runner>,
     occluders: Vec<Occluder>,
@@ -200,9 +206,17 @@ fn shares_of(labels: &[u8], sizes: &[f32]) -> [f32; 4] {
 
 /// Run `label` over every sample on up to `AWPY_TICK_SEGMENTS` threads and
 /// pack the per-area labels two bits each.
-fn run_samples<F>(samples: &[Sample], area_count: usize, label: F) -> napi::Result<ControlColumns>
+///
+/// Each thread gets its own `S`, which `label` may keep between consecutive
+/// samples (a thread's samples are contiguous and in order).
+fn run_samples<S, F>(
+    samples: &[Sample],
+    area_count: usize,
+    label: F,
+) -> napi::Result<ControlColumns>
 where
-    F: Fn(&Sample) -> ([f32; 4], Vec<u8>) + Sync,
+    S: Default,
+    F: Fn(&Sample, &mut S) -> ([f32; 4], Vec<u8>) + Sync,
 {
     let row_bytes = area_count.div_ceil(4);
     let threads = thread_budget().min(samples.len().div_ceil(8)).max(1);
@@ -215,8 +229,9 @@ where
                 scope.spawn(move || {
                     let mut shares = Vec::with_capacity(chunk.len() * 4);
                     let mut packed = vec![0u8; chunk.len() * row_bytes];
+                    let mut state = S::default();
                     for (index, sample) in chunk.iter().enumerate() {
-                        let (sample_shares, codes) = label(sample);
+                        let (sample_shares, codes) = label(sample, &mut state);
                         shares.extend_from_slice(&sample_shares);
                         let row = &mut packed[index * row_bytes..(index + 1) * row_bytes];
                         for (area, code) in codes.iter().enumerate() {
@@ -418,7 +433,7 @@ impl NavMesh {
                 .unwrap_or(Params::default().contest_margin),
             ..Params::default()
         };
-        run_samples(&samples, self.nav.area_count(), |sample| {
+        run_samples(&samples, self.nav.area_count(), |sample, _: &mut ()| {
             let control =
                 reachability_control(&self.nav, &sample.observers, &sample.occluders, &params);
             let codes = control
@@ -471,6 +486,7 @@ impl NavMesh {
             return Err(js_error("observer and fire sample counts differ"));
         }
         let sight_mode = input.sight.unwrap_or(0);
+        let sight_step = input.sight_step.unwrap_or(1).max(1) as usize;
         let sight = if sight_mode > 0 {
             Some(
                 self.sight
@@ -507,7 +523,10 @@ impl NavMesh {
                 let players = input.offsets[index] as usize..input.offsets[index + 1] as usize;
                 let fires =
                     input.fire_offsets[index] as usize..input.fire_offsets[index + 1] as usize;
-                let mut sample = Sample::default();
+                let mut sample = Sample {
+                    look: index % sight_step == 0,
+                    ..Sample::default()
+                };
                 for row in players {
                     let pos = [input.x[row], input.y[row], input.z[row]];
                     let Some(team) = team_of(input.team[row]) else {
@@ -576,40 +595,47 @@ impl NavMesh {
             .iter()
             .map(awpy::nav::NavArea::size)
             .collect();
-        run_samples(&samples, self.nav.area_count(), |sample| {
-            let control = self
-                .territory
-                .control(&sample.runners, &sample.burns, &params);
-            let Some(mesh) = sight else {
-                return (
-                    [
-                        control.ct_fraction,
-                        control.t_fraction,
-                        control.contested_fraction,
-                        control.neutral_fraction,
-                    ],
-                    control.labels,
-                );
-            };
-            let seen = raycast_control(
-                &self.nav,
-                mesh,
-                &sample.observers,
-                &sample.smokes,
-                &Params::default(),
-            );
-            let codes: Vec<u8> = control
-                .labels
-                .iter()
-                .zip(&seen.areas)
-                .map(|(&label, area)| match (label, area.ct, area.t) {
-                    (1, _, true) | (2, true, _) => 3,
-                    (0, ct, t) if sight_mode >= 2 => u8::from(ct) | (u8::from(t) << 1),
-                    (other, _, _) => other,
-                })
-                .collect();
-            (shares_of(&codes, &sizes), codes)
-        })
+        run_samples(
+            &samples,
+            self.nav.area_count(),
+            |sample, last_seen: &mut Vec<(bool, bool)>| {
+                let control = self
+                    .territory
+                    .control(&sample.runners, &sample.burns, &params);
+                let Some(mesh) = sight else {
+                    return (
+                        [
+                            control.ct_fraction,
+                            control.t_fraction,
+                            control.contested_fraction,
+                            control.neutral_fraction,
+                        ],
+                        control.labels,
+                    );
+                };
+                if sample.look || last_seen.is_empty() {
+                    let seen = raycast_control(
+                        &self.nav,
+                        mesh,
+                        &sample.observers,
+                        &sample.smokes,
+                        &Params::default(),
+                    );
+                    *last_seen = seen.areas.iter().map(|area| (area.ct, area.t)).collect();
+                }
+                let codes: Vec<u8> = control
+                    .labels
+                    .iter()
+                    .zip(last_seen.iter())
+                    .map(|(&label, &(ct, t))| match (label, ct, t) {
+                        (1, _, true) | (2, true, _) => 3,
+                        (0, ct, t) if sight_mode >= 2 => u8::from(ct) | (u8::from(t) << 1),
+                        (other, _, _) => other,
+                    })
+                    .collect();
+                (shares_of(&codes, &sizes), codes)
+            },
+        )
     }
 }
 
