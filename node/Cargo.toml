@@ -1,0 +1,37 @@
+[package]
+name = "awpy-node"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+license = "MIT"
+publish = false
+description = "Node.js bindings for the awpy CS2 demo parser"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+awpy = { path = "../crates/awpy" }
+napi = { version = "2.16", default-features = false, features = ["napi8", "serde-json"] }
+napi-derive = "2.16"
+serde_json = "1.0"
+
+[build-dependencies]
+napi-build = "2.1"
+
+# Kept out of the upstream workspace so its CI, lints, and lockfile stay
+# untouched; this crate is its own workspace root.
+[workspace]
+
+[profile.dev.package.awpy]
+opt-level = 1
+
+[profile.dev.package.pbdems2]
+opt-level = 1
+
+[profile.dev.package.awpy-proto]
+debug = false
+
+[profile.release]
+lto = true
+codegen-units = 1
