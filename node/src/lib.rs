@@ -9,6 +9,8 @@
 //! Steam ids are returned as decimal strings. They do not fit in a JavaScript
 //! number.
 
+mod map_control;
+
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
