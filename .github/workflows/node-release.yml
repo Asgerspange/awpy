@@ -1,0 +1,60 @@
+name: Release awpy-node
+
+# Builds the Node.js addon in node/ and attaches it to a GitHub release.
+# Push a tag such as awpy-node-v0.1.0 to publish.
+
+on:
+  push:
+    tags: ["awpy-node-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Debian bookworm matches the glibc of node:22-bookworm-slim images.
+    container: rust:1-bookworm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test awpy core
+        run: cargo test -p awpy --locked
+
+      - name: Build addon
+        working-directory: node
+        run: cargo build --release --locked
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp node/target/release/libawpy_node.so dist/awpy-node.linux-x64-gnu.node
+          cd dist
+          sha256sum awpy-node.linux-x64-gnu.node > awpy-node.linux-x64-gnu.node.sha256
+          cat awpy-node.linux-x64-gnu.node.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: awpy-node-linux-x64-gnu
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/awpy-node-v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: awpy-node-linux-x64-gnu
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Node.js addon for linux-x64-gnu, built from ${GITHUB_SHA}."
