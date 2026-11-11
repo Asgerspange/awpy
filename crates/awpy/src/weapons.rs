@@ -184,6 +184,45 @@ const STARTING_PISTOLS: &[WeaponVariant] = &[
         name: "usp_silencer",
     },
 ];
+/// The MP7 and MP5-SD can share the MP7 network class.
+const SMGS: &[WeaponVariant] = &[
+    WeaponVariant {
+        definition: 33,
+        subclass: 10_406_947,
+        name: "mp7",
+    },
+    WeaponVariant {
+        definition: 23,
+        subclass: 45_975_715,
+        name: "mp5sd",
+    },
+];
+/// The P250 and CZ75-Auto fill the same loadout slot.
+const AUTO_PISTOLS: &[WeaponVariant] = &[
+    WeaponVariant {
+        definition: 36,
+        subclass: 1_573_262_270,
+        name: "p250",
+    },
+    WeaponVariant {
+        definition: 63,
+        subclass: 3_464_182_751,
+        name: "cz75a",
+    },
+];
+/// The Five-SeveN and Tec-9 fill the same loadout slot.
+const SLOT_PISTOLS: &[WeaponVariant] = &[
+    WeaponVariant {
+        definition: 3,
+        subclass: 3_661_698_933,
+        name: "fiveseven",
+    },
+    WeaponVariant {
+        definition: 30,
+        subclass: 884_934_217,
+        name: "tec9",
+    },
+];
 /// Knives share one network class; the item definition names the model.
 /// Names follow the CS2 item names without the `weapon_` prefix.
 const KNIVES: &[WeaponVariant] = &[
@@ -323,6 +362,9 @@ impl WeaponIdentity {
             "CDEagle" | "CWeaponRevolver" => PISTOLS,
             "CWeaponM4A1" | "CWeaponM4A1Silencer" => RIFLES,
             "CWeaponHKP2000" | "CWeaponUSPSilencer" => STARTING_PISTOLS,
+            "CWeaponMP7" | "CWeaponMP5SD" => SMGS,
+            "CWeaponP250" | "CWeaponCZ75a" => AUTO_PISTOLS,
+            "CWeaponFiveSeven" | "CWeaponTec9" => SLOT_PISTOLS,
             knife if knife.starts_with("CKnife") => KNIVES,
             _ => &[],
         }
@@ -423,6 +465,9 @@ mod tests {
             ("CWeaponM4A1", RIFLES, Primary),
             ("CWeaponHKP2000", STARTING_PISTOLS, Secondary),
             ("CKnife", KNIVES, Melee),
+            ("CWeaponMP7", SMGS, Primary),
+            ("CWeaponP250", AUTO_PISTOLS, Secondary),
+            ("CWeaponFiveSeven", SLOT_PISTOLS, Secondary),
         ] {
             for variant in variants {
                 let info = entity_info(class, Some(variant.definition), None);
@@ -439,6 +484,9 @@ mod tests {
             ("CWeaponM4A1", RIFLES),
             ("CWeaponHKP2000", STARTING_PISTOLS),
             ("CKnife", KNIVES),
+            ("CWeaponMP7", SMGS),
+            ("CWeaponP250", AUTO_PISTOLS),
+            ("CWeaponFiveSeven", SLOT_PISTOLS),
         ] {
             for variant in variants {
                 for definition in [None, Some(0), Some(u32::MAX)] {
