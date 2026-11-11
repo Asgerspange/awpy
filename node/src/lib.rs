@@ -201,6 +201,8 @@ pub struct PlayerColumns {
     pub is_airborne: Uint8Array,
     pub is_scoped: Uint8Array,
     pub is_defusing: Uint8Array,
+    /// Flashbangs carried (the inventory lists the flashbang once).
+    pub flashbangs: Uint8Array,
     pub active_weapon: StringColumn,
     /// Comma-separated item names, in slot order.
     pub inventory: StringColumn,
@@ -228,6 +230,7 @@ struct PlayerChunk {
     is_airborne: Vec<u8>,
     is_scoped: Vec<u8>,
     is_defusing: Vec<u8>,
+    flashbangs: Vec<u8>,
     steamid: StringColumnBuilder,
     name: StringColumnBuilder,
     active_weapon: StringColumnBuilder,
@@ -263,6 +266,8 @@ impl PlayerChunk {
         self.is_airborne.push(u8::from(state.is_jumping));
         self.is_scoped.push(u8::from(state.is_scoped));
         self.is_defusing.push(u8::from(state.is_defusing));
+        self.flashbangs
+            .push(u8::try_from(state.flashbangs.max(0)).unwrap_or(u8::MAX));
         self.steamid.push_steamid(state.steamid);
         self.name.push(state.name.as_deref());
         self.active_weapon.push(state.active_weapon);
@@ -289,6 +294,7 @@ impl PlayerChunk {
         self.is_airborne.extend(other.is_airborne);
         self.is_scoped.extend(other.is_scoped);
         self.is_defusing.extend(other.is_defusing);
+        self.flashbangs.extend(other.flashbangs);
         self.steamid.append(other.steamid);
         self.name.append(other.name);
         self.active_weapon.append(other.active_weapon);
@@ -318,6 +324,7 @@ impl PlayerChunk {
             is_airborne: Uint8Array::new(self.is_airborne),
             is_scoped: Uint8Array::new(self.is_scoped),
             is_defusing: Uint8Array::new(self.is_defusing),
+            flashbangs: Uint8Array::new(self.flashbangs),
             active_weapon: self.active_weapon.finish(),
             inventory: self.inventory.finish(),
         }
