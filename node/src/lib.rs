@@ -145,6 +145,10 @@ pub struct GrenadeColumns {
     pub y: Float32Array,
     pub z: Float32Array,
     pub thrower_steamid: StringColumn,
+    /// First tick the projectile existed.
+    pub start_tick: Int32Array,
+    /// Last tick the projectile existed, moving or not.
+    pub end_tick: Int32Array,
 }
 
 /// One round, reconstructed from game-rules state.
@@ -447,6 +451,8 @@ impl Demo {
         let mut x = Vec::with_capacity(rows.len());
         let mut y = Vec::with_capacity(rows.len());
         let mut z = Vec::with_capacity(rows.len());
+        let mut start_tick = Vec::with_capacity(rows.len());
+        let mut end_tick = Vec::with_capacity(rows.len());
         let mut kind = StringColumnBuilder::default();
         let mut thrower = StringColumnBuilder::default();
         for row in rows {
@@ -456,6 +462,8 @@ impl Demo {
             x.push(row.x);
             y.push(row.y);
             z.push(row.z);
+            start_tick.push(row.start_tick);
+            end_tick.push(row.end_tick);
             kind.push(Some(row.grenade_type.as_str()));
             thrower.push_steamid(row.thrower_steamid);
         }
@@ -468,6 +476,8 @@ impl Demo {
             y: Float32Array::new(y),
             z: Float32Array::new(z),
             thrower_steamid: thrower.finish(),
+            start_tick: Int32Array::new(start_tick),
+            end_tick: Int32Array::new(end_tick),
         })
     }
 
