@@ -1228,6 +1228,10 @@ impl GameRulesKeys {
 #[derive(Default)]
 struct RoundTracker {
     rounds: Vec<Round>,
+    /// Rounds the latest match restart discarded. A restart with nothing played
+    /// after it (an admin reset as the recording ends, or a crash before a
+    /// backup restore that continues in the next part) must not erase the map.
+    before_restart: Vec<Round>,
     start_tick: Option<i32>,
     freeze_end_tick: Option<i32>,
     prev_freeze: bool,
@@ -1256,11 +1260,27 @@ impl RoundTracker {
         let Ok(total) = i32::try_from(entity.get_i64(keys.total_rounds)) else {
             return;
         };
+        let win_status = entity.get_i64(keys.win_status);
+        let win_reason = entity.get_i64(keys.win_reason);
+        self.step(ctx.tick(), warmup, freeze, total, win_status, win_reason);
+    }
 
+    /// Advance on one observed game-rules state.
+    fn step(
+        &mut self,
+        tick: i32,
+        warmup: bool,
+        freeze: bool,
+        total: i32,
+        win_status: i64,
+        win_reason: i64,
+    ) {
         // A match restart discards warmup/knife-round state and resets the
         // canonical round counter.
         if total < self.prev_total {
-            self.rounds.clear();
+            if !self.rounds.is_empty() {
+                self.before_restart = std::mem::take(&mut self.rounds);
+            }
             self.start_tick = None;
             self.freeze_end_tick = None;
         }
@@ -1268,18 +1288,15 @@ impl RoundTracker {
         // Emit before processing this tick's freeze transition: the deciding
         // round and post-game freeze can begin on the same tick.
         if !warmup && total == self.prev_total + 1 {
-            let win_status = entity.get_i64(keys.win_status);
-            let (Ok(winner), Ok(reason)) = (
-                i32::try_from(win_status),
-                i32::try_from(entity.get_i64(keys.win_reason)),
-            ) else {
+            let (Ok(winner), Ok(reason)) = (i32::try_from(win_status), i32::try_from(win_reason))
+            else {
                 return;
             };
             self.rounds.push(Round {
                 round_num: total,
                 start_tick: self.start_tick,
                 freeze_end_tick: self.freeze_end_tick,
-                end_tick: ctx.tick(),
+                end_tick: tick,
                 official_end_tick: None,
                 winner,
                 winner_side: team_name(win_status).to_string(),
@@ -1296,17 +1313,27 @@ impl RoundTracker {
                 if let Some(last) = self.rounds.last_mut()
                     && last.official_end_tick.is_none()
                 {
-                    last.official_end_tick = Some(ctx.tick());
+                    last.official_end_tick = Some(tick);
                 }
-                self.start_tick = Some(ctx.tick());
+                self.start_tick = Some(tick);
                 self.freeze_end_tick = None;
             } else if !freeze && self.prev_freeze {
-                self.freeze_end_tick = Some(ctx.tick());
+                self.freeze_end_tick = Some(tick);
             }
         }
 
         self.prev_freeze = freeze;
         self.prev_total = total;
+    }
+
+    /// The rounds of the last restart that was followed by play, or the rounds
+    /// before it when nothing was played after the latest restart.
+    fn finish(self) -> Vec<Round> {
+        if self.rounds.is_empty() {
+            self.before_restart
+        } else {
+            self.rounds
+        }
     }
 }
 
@@ -1810,8 +1837,9 @@ impl Parser {
             tracker.observe(ctx);
         })?;
 
-        self.mark_knife_rounds(&mut tracker.rounds)?;
-        Ok(tracker.rounds)
+        let mut rounds = tracker.finish();
+        self.mark_knife_rounds(&mut rounds)?;
+        Ok(rounds)
     }
 
     /// Whether the first and last recorded game states are outside live play.
@@ -2243,7 +2271,7 @@ impl Parser {
             shots,
         };
         let mut rounds = round_tracker
-            .map(|tracker| tracker.rounds)
+            .map(RoundTracker::finish)
             .unwrap_or_default();
         Self::mark_knife_rounds_from_kills(&mut rounds, &events.kills);
         let players = player_tracker
@@ -4368,5 +4396,51 @@ mod tests {
         let flags = trade_flags(&kills, 320);
         assert_eq!(flags[0], (false, false));
         assert_eq!(flags[1], (false, false));
+    }
+
+
+    /// Play `count` rounds after `total` already-played ones, from `tick` on, 1000 ticks each.
+    fn play_rounds(tracker: &mut RoundTracker, tick: &mut i32, total: &mut i32, count: i32) {
+        for _ in 0..count {
+            tracker.step(*tick, false, true, *total, 0, 0);
+            tracker.step(*tick + 100, false, false, *total, 0, 0);
+            *total += 1;
+            tracker.step(*tick + 900, false, false, *total, 3, 8);
+            *tick += 1000;
+        }
+    }
+
+    #[test]
+    fn a_restart_with_nothing_played_after_it_keeps_the_rounds_before_it() {
+        let mut tracker = RoundTracker::default();
+        let (mut tick, mut total) = (0, 0);
+        play_rounds(&mut tracker, &mut tick, &mut total, 17);
+        // The admins reset the match as the recording ends (the map continues in the next part).
+        tracker.step(tick, true, false, 0, 0, 0);
+        tracker.step(tick + 50, true, true, 0, 0, 0);
+
+        let rounds = tracker.finish();
+
+        assert_eq!(rounds.len(), 17);
+        assert_eq!(rounds[0].round_num, 1);
+        assert_eq!(rounds[16].round_num, 17);
+    }
+
+    #[test]
+    fn a_restart_followed_by_play_drops_the_rounds_before_it() {
+        let mut tracker = RoundTracker::default();
+        let (mut tick, mut total) = (0, 0);
+        // A knife round, then the restart into the live match.
+        play_rounds(&mut tracker, &mut tick, &mut total, 1);
+        total = 0;
+        tracker.step(tick, false, false, total, 0, 0);
+        tick += 1000;
+        play_rounds(&mut tracker, &mut tick, &mut total, 3);
+
+        let rounds = tracker.finish();
+
+        assert_eq!(rounds.len(), 3);
+        assert_eq!(rounds[0].start_tick, Some(2000));
+        assert_eq!(rounds[0].end_tick, 2900);
     }
 }
